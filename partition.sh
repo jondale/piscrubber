@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [ -z "$1" ]; then
-  echo "Usage: ${0} [device]";
+  echo "Usage: ${0} <device>";
   exit 111;
 fi
 
@@ -23,9 +23,4 @@ echo 7 # Partition type 7 (HPFS/NTFS/ExFAT)
 echo w # Write changes
 ) | fdisk $DEVICE 
 
-if [ $? -ne 0 ]; then exit 1; fi
-
-for n in $PARTMATCH ; do umount -f $n ; done
-mkfs.exfat $PARTITION -n "USBDRIVE"
-
-exit 0
+exit $? 

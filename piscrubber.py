@@ -10,10 +10,17 @@ import gobject
 from pyudev import Context, Monitor
 from pyudev.glib import MonitorObserver
 
+import logging
+logging.info("piscrubber")
+logger = logging.getLogger(__file__)
+logger.setLevel(logging.DEBUG)
+
 # ####### CONFIG ###################
 
 scrub_path = "/usr/bin/scrub"
 partition_path = "/home/pi/piscrubber/partition.sh"
+format_path = "/home/pi/piscrubber/format.sh"
+badblocks_path = "/home/pi/piscrubber/badblocks.sh"
 
 # ####### CONFIG ###################
 
@@ -40,7 +47,7 @@ class DeviceScreen:
             self.status = 1
 
     def say(self, line1=None, line2="", seconds=0):
-        print "say: {}\t{}".format(line1, line2)
+        logger.info("say: {}\t{}".format(line1, line2))
         self.lcd.clear()
         self.on()
         if not line1:
@@ -59,14 +66,14 @@ class DeviceScreen:
 
 
 class DiskScrubber:
-    devices = []
+    logger = None
     device = None
     label = None
     lcd = None
     start_time = None
     last_time = None
 
-    state = None  # None, "INIT", "SCRUB"
+    state = None
     seconds = 0
 
     def __init__(self):
@@ -74,7 +81,7 @@ class DiskScrubber:
         self.lcd.say()
 
     def scrub(self, device, label=None):
-        print "SCRUB CALL: {} {}".format(device, label)
+        logger.info("SCRUB CALL: {} {}".format(device, label))
         if not self.device:
             self.device = device
             self.label = label or device
@@ -86,8 +93,8 @@ class DiskScrubber:
     def time_format(self, t):
             hours = int(t / 3600)
             minutes = int((t - (hours*3600)) / 60)
-            seconds = t - (hours*3600) - (minutes*60)
-            return "{}H {}M {}S".format(hours, minutes, seconds)
+            seconds = int(t - (hours*3600) - (minutes*60))
+            return "{}h {}m {}s".format(hours, minutes, seconds)
 
     def step(self):
 
@@ -117,7 +124,7 @@ class DiskScrubber:
 
         if self.state == "SCRUB1":
             # NNSA NAP-14.1-C
-            self.lcd.say(self.label, "PASS 1: RANDOM")
+            self.lcd.say(self.label, "1: RANDOM")
             r = call([scrub_path, "-S", "-f", "-p", "random", self.device])
             if r != 0:
                 self.state = "FAILED"
@@ -125,13 +132,13 @@ class DiskScrubber:
             pass_time = self.time_format(time.time() - self.last_time)
             self.last_time = time.time()
             total_time = self.time_format(time.time() - self.start_time)
-            print "Pass 1: {} seconds".format(pass_time)
-            print "Total: {} seconds".format(total_time)
+            logger.info("Pass 1: {}".format(pass_time))
+            logger.info("Total: {}".format(total_time))
             self.state = "SCRUB2"
             return
 
         if self.state == "SCRUB2":
-            self.lcd.say(self.label, "PASS 2: RANDOM")
+            self.lcd.say(self.label, "2: RANDOM")
             r = call([scrub_path, "-S", "-f", "-p", "random", self.device])
             if r != 0:
                 self.state = "FAILED"
@@ -139,13 +146,13 @@ class DiskScrubber:
             pass_time = self.time_format(time.time() - self.last_time)
             self.last_time = time.time()
             total_time = self.time_format(time.time() - self.start_time)
-            print "Pass 2: {} seconds".format(pass_time)
-            print "Total: {} seconds".format(total_time)
+            logger.info("Pass 2: {}".format(pass_time))
+            logger.info("Total: {}".format(total_time))
             self.state = "SCRUB3"
             return
 
         if self.state == "SCRUB3":
-            self.lcd.say(self.label, "PASS 3: ZERO/VERIFY")
+            self.lcd.say(self.label, "3: 0 + VERIFY")
             r = call([scrub_path, "-S", "-f", "-p", "verify", self.device])
             if r != 0:
                 self.state = "FAILED"
@@ -153,13 +160,13 @@ class DiskScrubber:
             pass_time = self.time_format(time.time() - self.last_time)
             self.last_time = time.time()
             total_time = self.time_format(time.time() - self.start_time)
-            print "Pass 3: {} seconds".format(pass_time)
-            print "Total: {} seconds".format(total_time)
+            logger.info("Pass 3: {}".format(pass_time))
+            logger.info("Total: {}".format(total_time))
             self.state = "SCRUB4"
             return
 
         if self.state == "SCRUB4":
-            self.lcd.say(self.label, "PARTITION/FORMAT")
+            self.lcd.say(self.label, "4: PARTITION")
             time.sleep(10)
             r = call([partition_path, self.device])
             if r != 0:
@@ -168,8 +175,38 @@ class DiskScrubber:
             pass_time = self.time_format(time.time() - self.last_time)
             self.last_time = time.time()
             total_time = self.time_format(time.time() - self.start_time)
-            print "PARTITION/FORMAT: {} seconds".format(pass_time)
-            print "Total: {} seconds".format(total_time)
+            logger.info("PARTITION: {}".format(pass_time))
+            logger.info("Total: {}".format(total_time))
+            self.state = "SCRUB5"
+            return
+
+        if self.state == "SCRUB5":
+            self.lcd.say(self.label, "5: FORMAT")
+            time.sleep(10)
+            r = call([format_path, self.device])
+            if r != 0:
+                self.state = "FAILED"
+                return
+            pass_time = self.time_format(time.time() - self.last_time)
+            self.last_time = time.time()
+            total_time = self.time_format(time.time() - self.start_time)
+            logger.info("FORMAT: {}".format(pass_time))
+            logger.info("Total: {}".format(total_time))
+            self.state = "SCRUB6"
+            return
+
+        if self.state == "SCRUB6":
+            self.lcd.say(self.label, "6: BLOCK TEST")
+            time.sleep(10)
+            r = call([badblocks_path, self.device])
+            if r != 0:
+                self.state = "FAILED"
+                return
+            pass_time = self.time_format(time.time() - self.last_time)
+            self.last_time = time.time()
+            total_time = self.time_format(time.time() - self.start_time)
+            logger.info("BADBLOCKS: {}".format(pass_time))
+            logger.info("Total: {}".format(total_time))
             self.state = "REMOVE"
             return
 
@@ -187,7 +224,7 @@ class DiskScrubber:
 
         if self.state == "REMOVE-FLASH-OFF":
             self.lcd.off()
-            self.state = "REMOVE"
+            self.state = "REMOVE-FLASH-ON"
             return
 
         if self.state == "FAILED":
@@ -208,7 +245,7 @@ def device_change(observer, device):
         model = device.get("ID_MODEL")
         label = "{} {}".format(vendor, model)
 
-        print "{}:\t{}\t{}".format(device.action, path, label)
+        logger.info("{}:\t{}\t{}".format(device.action, path, label))
         if device.action == "add":
             scrubber.scrub(path, label)
 
